@@ -98,6 +98,12 @@ struct Logger {
             FileHandle.standardError.write(data)
         }
     }
+
+    static func timestamp() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: Date())
+    }
 }
 
 // MARK: - Cache
@@ -490,6 +496,7 @@ struct Scanner {
 
             if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
                 let remoteVersion = cask.version
+                logger.info("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 let status = compare(local: app.version, remote: remoteVersion)
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
@@ -500,6 +507,7 @@ struct Scanner {
             }
 
             if let feed = app.sparkleFeed, let remote = sparkle.fetchLatestVersion(feedURL: feed) {
+                logger.info("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
                 let status = compare(local: app.version, remote: remote)
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,

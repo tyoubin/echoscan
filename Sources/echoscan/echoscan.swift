@@ -253,6 +253,7 @@ struct CaskEntry: Decodable {
     let homepage: String?
     let version: String
     let bundleIDs: [String]
+    let appNames: [String]
 
     enum CodingKeys: String, CodingKey {
         case token
@@ -261,6 +262,7 @@ struct CaskEntry: Decodable {
         case homepage
         case version
         case bundleID = "bundle_id"
+        case artifacts
     }
 
     init(from decoder: Decoder) throws {
@@ -284,6 +286,13 @@ struct CaskEntry: Decodable {
         } else {
             bundleIDs = []
         }
+
+        let artifacts = (try? container.decode([JSONValue].self, forKey: .artifacts)) ?? []
+        var collected: [String] = []
+        for value in artifacts {
+            value.collectAppNames(into: &collected)
+        }
+        appNames = Array(Set(collected))
     }
 
     var displayName: String {
@@ -293,20 +302,31 @@ struct CaskEntry: Decodable {
 }
 
 struct CaskIndex {
-    private var map: [String: CaskEntry] = [:]
+    private var bundleMap: [String: CaskEntry] = [:]
+    private var appNameMap: [String: CaskEntry] = [:]
 
     init(casks: [CaskEntry]) {
         for cask in casks {
             for id in cask.bundleIDs {
-                if map[id] == nil {
-                    map[id] = cask
+                if bundleMap[id] == nil {
+                    bundleMap[id] = cask
+                }
+            }
+            for appName in cask.appNames {
+                let key = normalizeAppName(appName)
+                if !key.isEmpty, appNameMap[key] == nil {
+                    appNameMap[key] = cask
                 }
             }
         }
     }
 
     func lookup(bundleID: String) -> CaskEntry? {
-        return map[bundleID]
+        return bundleMap[bundleID]
+    }
+
+    func lookup(appName: String) -> CaskEntry? {
+        return appNameMap[normalizeAppName(appName)]
     }
 }
 
@@ -485,6 +505,7 @@ enum Status: String {
     case update = "Update"
     case current = "Current"
     case unknown = "Check"
+    case headsup = "Possible"
 }
 
 struct Scanner {
@@ -501,6 +522,31 @@ struct Scanner {
             if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
                 let remoteVersion = cask.version
                 let status = compare(local: app.version, remote: remoteVersion)
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
+                results.append(ScanResult(appName: app.name,
+                                          localVersion: localVersion,
+                                          remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
+                                          source: "Homebrew",
+                                          status: status))
+                continue
+            }
+
+            if let cask = index.lookup(appName: app.name) {
+                let remoteVersion = cask.version
+                let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
+                results.append(ScanResult(appName: app.name,
+                                          localVersion: localVersion,
+                                          remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
+                                          source: "Homebrew",
+                                          status: status))
+                continue
+            }
+
+            let fileName = app.url.deletingPathExtension().lastPathComponent
+            if fileName != app.name, let cask = index.lookup(appName: fileName) {
+                let remoteVersion = cask.version
+                let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
                 logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
@@ -532,10 +578,17 @@ struct Scanner {
     }
 
     private func compare(local: String?, remote: String) -> Status {
+        return compare(local: local, remote: remote, weakMatch: false)
+    }
+
+    private func compare(local: String?, remote: String, weakMatch: Bool) -> Status {
         guard let localVersion = Version.parse(local), let remoteVersion = Version.parse(remote) else {
             return .unknown
         }
-        return remoteVersion > localVersion ? .update : .current
+        if remoteVersion > localVersion {
+            return weakMatch ? .headsup : .update
+        }
+        return .current
     }
 }
 
@@ -560,9 +613,10 @@ enum OutputRenderer {
         TablePrinter.print(headers: headers, rows: rows)
 
         let updates = sorted.filter { $0.status == .update }.count
+        let headsups = sorted.filter { $0.status == .headsup }.count
         let checks = sorted.filter { $0.status == .unknown }.count
         let total = sorted.count
-        Swift.print("\n\(updates) update(s) available, \(checks) check(s) required, \(total) shown.")
+        Swift.print("\n\(updates) update(s) available, \(headsups) possible update(s), \(checks) check(s) required, \(total) shown.")
     }
 
     private static func colorize(_ text: String, status: Status, useColor: Bool) -> String {
@@ -574,6 +628,8 @@ enum OutputRenderer {
             return "\u{001B}[32m\(text)\u{001B}[0m"
         case .unknown:
             return "\u{001B}[33m\(text)\u{001B}[0m"
+        case .headsup:
+            return "\u{001B}[36m\(text)\u{001B}[0m"
         }
     }
 
@@ -581,10 +637,12 @@ enum OutputRenderer {
         switch status {
         case .update:
             return 0
-        case .unknown:
+        case .headsup:
             return 1
-        case .current:
+        case .unknown:
             return 2
+        case .current:
+            return 3
         }
     }
 }
@@ -693,5 +751,60 @@ extension String {
     func stripANSI() -> String {
         let pattern = "\\u001B\\[[0-9;]*m"
         return self.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+    }
+}
+
+func normalizeAppName(_ name: String) -> String {
+    var value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.lowercased().hasSuffix(".app") {
+        value = String(value.dropLast(4))
+    }
+    return value.lowercased()
+}
+
+enum JSONValue: Decodable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .null
+        }
+    }
+
+    func collectAppNames(into output: inout [String]) {
+        switch self {
+        case .string(let value):
+            if value.lowercased().hasSuffix(".app") {
+                output.append(value)
+            }
+        case .array(let values):
+            for value in values {
+                value.collectAppNames(into: &output)
+            }
+        case .object(let dict):
+            for value in dict.values {
+                value.collectAppNames(into: &output)
+            }
+        case .number, .bool, .null:
+            break
+        }
     }
 }

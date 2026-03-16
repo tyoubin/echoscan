@@ -16,13 +16,14 @@ struct EchoScan {
             logger.event("EchoScan starting")
             let cache = try CacheStore.makeDefault()
             logger.event("Cache directory: \(cache.directory.path)")
+            let sparkleCache = try SparkleCacheStore.makeDefault(baseDirectory: cache.directory)
             let client = CaskAPIClient(cache: cache, logger: logger)
             let casks = try client.fetchCasks()
             let index = CaskIndex(casks: casks)
 
             let apps = try LocalAppFinder.findApps(logger: logger)
             logger.event("Scanning \(apps.count) local app(s)")
-            let scanner = Scanner(index: index, logger: logger)
+            let scanner = Scanner(index: index, logger: logger, sparkleCache: sparkleCache)
             let results = try scanner.scan(apps: apps)
 
             OutputRenderer.render(results: results, useColor: options.useColor)
@@ -168,6 +169,56 @@ struct CacheMetadata: Codable {
     let etag: String?
     let lastModified: String?
     let savedAt: Date
+}
+
+struct SparkleCacheStore {
+    let directory: URL
+
+    static func makeDefault(baseDirectory: URL) throws -> SparkleCacheStore {
+        let dir = baseDirectory.appendingPathComponent("sparkle", isDirectory: true)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: dir.path) {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return SparkleCacheStore(directory: dir)
+    }
+
+    func loadMetadata(for feedURL: URL) -> CacheMetadata? {
+        let url = metaURL(for: feedURL)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(CacheMetadata.self, from: data)
+    }
+
+    func saveMetadata(_ meta: CacheMetadata, for feedURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(meta)
+        try data.write(to: metaURL(for: feedURL), options: [.atomic])
+    }
+
+    func loadData(for feedURL: URL) -> Data? {
+        return try? Data(contentsOf: dataURL(for: feedURL))
+    }
+
+    func saveData(_ data: Data, for feedURL: URL) throws {
+        try data.write(to: dataURL(for: feedURL), options: [.atomic])
+    }
+
+    private func dataURL(for feedURL: URL) -> URL {
+        directory.appendingPathComponent("\(hash(feedURL)).xml")
+    }
+
+    private func metaURL(for feedURL: URL) -> URL {
+        directory.appendingPathComponent("\(hash(feedURL)).meta.json")
+    }
+
+    private func hash(_ feedURL: URL) -> String {
+        let value = feedURL.absoluteString
+        return String(value.hashValue, radix: 16)
+    }
 }
 
 // MARK: - Cask API
@@ -476,20 +527,68 @@ struct Version: Comparable {
 
 struct SparkleClient {
     let logger: Logger
+    let cache: SparkleCacheStore
 
     func fetchLatestVersion(feedURL: URL) -> String? {
         var request = URLRequest(url: feedURL)
         request.httpMethod = "GET"
         request.setValue("echoscan", forHTTPHeaderField: "User-Agent")
+        logger.event("Fetching Sparkle feed: \(feedURL.absoluteString)")
+
+        let cachedMeta = cache.loadMetadata(for: feedURL)
+        if let etag = cachedMeta?.etag {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        if let lastModified = cachedMeta?.lastModified {
+            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        }
 
         do {
-            let (data, _) = try URLSession.shared.syncData(for: request)
-            let parser = SparkleFeedParser(logger: logger)
-            return parser.parse(data: data)
+            let (data, response) = try URLSession.shared.syncData(for: request)
+            if let http = response as? HTTPURLResponse {
+                switch http.statusCode {
+                case 200:
+                    let etag = headerValue(from: http, name: "ETag")
+                    let lastModified = headerValue(from: http, name: "Last-Modified")
+                    try cache.saveData(data, for: feedURL)
+                    try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()), for: feedURL)
+                    let parser = SparkleFeedParser(logger: logger)
+                    return parser.parse(data: data)
+                case 304:
+                    if let cached = cache.loadData(for: feedURL) {
+                        let parser = SparkleFeedParser(logger: logger)
+                        return parser.parse(data: cached)
+                    }
+                default:
+                    if let cached = cache.loadData(for: feedURL) {
+                        let parser = SparkleFeedParser(logger: logger)
+                        return parser.parse(data: cached)
+                    }
+                }
+            }
+            if let cached = cache.loadData(for: feedURL) {
+                let parser = SparkleFeedParser(logger: logger)
+                return parser.parse(data: cached)
+            }
         } catch {
             logger.info("Sparkle fetch failed for \(feedURL.absoluteString): \(error)")
+            if let cached = cache.loadData(for: feedURL) {
+                let parser = SparkleFeedParser(logger: logger)
+                return parser.parse(data: cached)
+            }
             return nil
         }
+        return nil
+    }
+
+    private func headerValue(from response: HTTPURLResponse, name: String) -> String? {
+        for (key, value) in response.allHeaderFields {
+            guard let key = key as? String else { continue }
+            if key.caseInsensitiveCompare(name) == .orderedSame {
+                return value as? String
+            }
+        }
+        return nil
     }
 }
 
@@ -557,7 +656,13 @@ enum Status: String {
 struct Scanner {
     let index: CaskIndex
     let logger: Logger
-    var sparkle: SparkleClient { SparkleClient(logger: logger) }
+    let sparkle: SparkleClient
+
+    init(index: CaskIndex, logger: Logger, sparkleCache: SparkleCacheStore) {
+        self.index = index
+        self.logger = logger
+        self.sparkle = SparkleClient(logger: logger, cache: sparkleCache)
+    }
 
     func scan(apps: [LocalApp]) throws -> [ScanResult] {
         var results: [ScanResult] = []

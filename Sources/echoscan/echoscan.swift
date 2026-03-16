@@ -93,6 +93,10 @@ struct Logger {
         write(message)
     }
 
+    func scan(_ message: String) {
+        write(message)
+    }
+
     private func write(_ message: String) {
         if let data = (message + "\n").data(using: .utf8) {
             FileHandle.standardError.write(data)
@@ -318,7 +322,7 @@ struct LocalApp {
 
 enum LocalAppFinder {
     static func findApps(logger: Logger) throws -> [LocalApp] {
-        let query = "kMDItemContentType == 'com.apple.application-bundle' && kMDItemAppStoreHasReceipt == 0"
+        let query = "kMDItemContentType == 'com.apple.application-bundle'"
         let output = try ProcessRunner.run("/usr/bin/mdfind", ["-onlyin", "/Applications", query])
         let paths = output.split(separator: "\n").map { String($0) }
         var apps: [LocalApp] = []
@@ -496,7 +500,7 @@ struct Scanner {
 
             if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
                 let remoteVersion = cask.version
-                logger.info("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 let status = compare(local: app.version, remote: remoteVersion)
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
@@ -507,7 +511,7 @@ struct Scanner {
             }
 
             if let feed = app.sparkleFeed, let remote = sparkle.fetchLatestVersion(feedURL: feed) {
-                logger.info("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
                 let status = compare(local: app.version, remote: remote)
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,

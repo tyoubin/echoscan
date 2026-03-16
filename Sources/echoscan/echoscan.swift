@@ -216,8 +216,7 @@ struct SparkleCacheStore {
     }
 
     private func hash(_ feedURL: URL) -> String {
-        let value = feedURL.absoluteString
-        return String(value.hashValue, radix: 16)
+        return fnv1a64Hex(feedURL.absoluteString)
     }
 }
 
@@ -918,6 +917,16 @@ func sanitizeCaskVersion(_ version: String) -> String {
         return String(version[..<comma])
     }
     return version
+}
+
+func fnv1a64Hex(_ value: String) -> String {
+    let prime: UInt64 = 1099511628211
+    var hash: UInt64 = 14695981039346656037
+    for byte in value.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= prime
+    }
+    return String(format: "%016llx", hash)
 }
 
 enum JSONValue: Decodable {

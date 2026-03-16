@@ -13,16 +13,20 @@ struct EchoScan {
         }
 
         do {
+            logger.event("EchoScan starting")
             let cache = try CacheStore.makeDefault()
+            logger.event("Cache directory: \(cache.directory.path)")
             let client = CaskAPIClient(cache: cache, logger: logger)
             let casks = try client.fetchCasks()
             let index = CaskIndex(casks: casks)
 
             let apps = try LocalAppFinder.findApps(logger: logger)
+            logger.event("Scanning \(apps.count) local app(s)")
             let scanner = Scanner(index: index, logger: logger)
             let results = try scanner.scan(apps: apps)
 
             OutputRenderer.render(results: results, useColor: options.useColor)
+            logger.event("EchoScan finished")
         } catch {
             logger.error("fatal: \(error)")
             exit(1)
@@ -91,6 +95,10 @@ struct Logger {
 
     func error(_ message: String) {
         write(message)
+    }
+
+    func event(_ message: String) {
+        write("\(Logger.timestamp()) \(message)")
     }
 
     func scan(_ message: String) {
@@ -172,6 +180,7 @@ struct CaskAPIClient {
     }
 
     func fetchCasks() throws -> [CaskEntry] {
+        logger.event("Fetching Homebrew cask index")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
         request.setValue("echoscan", forHTTPHeaderField: "User-Agent")
@@ -195,19 +204,25 @@ struct CaskAPIClient {
             let lastModified = headerValue(from: http, name: "Last-Modified")
             try cache.saveData(data)
             try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()))
-            logger.info("Fetched cask list (200)")
-            return try decodeCasks(from: data)
+            logger.event("Cask index updated (HTTP 200)")
+            let casks = try decodeCasks(from: data)
+            logger.event("Loaded \(casks.count) casks")
+            return casks
         case 304:
-            logger.info("Using cached cask list (304)")
+            logger.event("Cask index not modified (HTTP 304), using cache")
             if let cached = cache.loadData() {
-                return try decodeCasks(from: cached)
+                let casks = try decodeCasks(from: cached)
+                logger.event("Loaded \(casks.count) casks")
+                return casks
             }
-            logger.error("Cache miss after 304; refetching")
+            logger.event("Cache miss after 304; refetching")
             return try fetchWithoutCache()
         default:
-            logger.error("Unexpected status \(http.statusCode). Using cached data if present.")
+            logger.event("Unexpected status \(http.statusCode). Using cached data if present.")
             if let cached = cache.loadData() {
-                return try decodeCasks(from: cached)
+                let casks = try decodeCasks(from: cached)
+                logger.event("Loaded \(casks.count) casks")
+                return casks
             }
             throw ScanError.network("HTTP \(http.statusCode)")
         }
@@ -225,7 +240,10 @@ struct CaskAPIClient {
         let lastModified = headerValue(from: http, name: "Last-Modified")
         try cache.saveData(data)
         try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()))
-        return try decodeCasks(from: data)
+        logger.event("Cask index refreshed")
+        let casks = try decodeCasks(from: data)
+        logger.event("Loaded \(casks.count) casks")
+        return casks
     }
 
     private func headerValue(from response: HTTPURLResponse, name: String) -> String? {
@@ -343,21 +361,27 @@ struct LocalApp {
 enum LocalAppFinder {
     static func findApps(logger: Logger) throws -> [LocalApp] {
         let query = "kMDItemContentType == 'com.apple.application-bundle'"
+        logger.event("Searching /Applications via mdfind")
         let output = try ProcessRunner.run("/usr/bin/mdfind", ["-onlyin", "/Applications", query])
         let paths = output.split(separator: "\n").map { String($0) }
         var apps: [LocalApp] = []
+        var skippedNested = 0
+        var skippedAppStore = 0
+        var skippedApple = 0
+        var skippedNoBundle = 0
 
         for path in paths {
             guard path.hasSuffix(".app") else { continue }
             let url = URL(fileURLWithPath: path)
             guard url.path.hasPrefix("/Applications/") else { continue }
-            guard !isNestedApp(url: url) else { continue }
-            guard !isAppStoreApp(url: url) else { continue }
-            guard let app = readBundle(at: url, logger: logger) else { continue }
-            if let bundleID = app.bundleID, bundleID.hasPrefix("com.apple.") { continue }
+            guard !isNestedApp(url: url) else { skippedNested += 1; continue }
+            guard !isAppStoreApp(url: url) else { skippedAppStore += 1; continue }
+            guard let app = readBundle(at: url, logger: logger) else { skippedNoBundle += 1; continue }
+            if let bundleID = app.bundleID, bundleID.hasPrefix("com.apple.") { skippedApple += 1; continue }
             apps.append(app)
         }
 
+        logger.event("Found \(apps.count) app(s) after filtering (\(paths.count) candidates, \(skippedNested) nested, \(skippedAppStore) App Store, \(skippedApple) Apple, \(skippedNoBundle) missing bundle)")
         return apps.sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 

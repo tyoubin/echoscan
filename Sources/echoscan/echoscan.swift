@@ -44,7 +44,7 @@ struct CLIOptions {
     static func parse() -> CLIOptions {
         var useColor = true
         var showHelp = false
-        var verbose = false
+        var verbose = true
 
         for arg in CommandLine.arguments.dropFirst() {
             switch arg {
@@ -54,6 +54,8 @@ struct CLIOptions {
                 showHelp = true
             case "-v", "--verbose":
                 verbose = true
+            case "--quiet":
+                verbose = false
             default:
                 break
             }
@@ -72,10 +74,11 @@ enum HelpPrinter {
         EchoScan scans local .app bundles and compares versions against Homebrew Cask.
 
         Usage:
-          echoscan [--no-color] [--verbose]
+          echoscan [--no-color] [--quiet] [--verbose]
 
         Options:
           --no-color   Disable ANSI colors
+          --quiet      Reduce stderr output
           --verbose    Print extra diagnostics to stderr
           -h, --help   Show help
         """

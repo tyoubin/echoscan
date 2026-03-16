@@ -500,8 +500,8 @@ struct Scanner {
 
             if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
                 let remoteVersion = cask.version
-                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 let status = compare(local: app.version, remote: remoteVersion)
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
@@ -511,8 +511,8 @@ struct Scanner {
             }
 
             if let feed = app.sparkleFeed, let remote = sparkle.fetchLatestVersion(feedURL: feed) {
-                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
                 let status = compare(local: app.version, remote: remote)
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
                                           remoteVersion: remote,

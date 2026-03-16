@@ -1,0 +1,30 @@
+name: Build macOS Universal
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build universal binary
+        run: |
+          swift build -c release --arch x86_64 --arch arm64
+          mkdir -p .build/universal
+          lipo -create \
+            .build/x86_64-apple-macosx/release/echoscan \
+            .build/arm64-apple-macosx/release/echoscan \
+            -output .build/universal/echoscan
+          chmod +x .build/universal/echoscan
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echoscan-macos-universal
+          path: .build/universal/echoscan
+          if-no-files-found: error

@@ -24,6 +24,8 @@ Binary location (debug build):
 .build/debug/echoscan
 ```
 
+GitHub Actions builds a universal macOS binary on every push. You can download the latest from the workflow run artifacts.
+
 ## Usage
 
 ```bash

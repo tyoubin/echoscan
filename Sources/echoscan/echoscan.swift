@@ -520,7 +520,7 @@ struct Scanner {
             let localVersion = app.version ?? "N/A"
 
             if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
-                let remoteVersion = cask.version
+                let remoteVersion = sanitizeCaskVersion(cask.version)
                 let status = compare(local: app.version, remote: remoteVersion)
                 logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 results.append(ScanResult(appName: app.name,
@@ -532,7 +532,7 @@ struct Scanner {
             }
 
             if let cask = index.lookup(appName: app.name) {
-                let remoteVersion = cask.version
+                let remoteVersion = sanitizeCaskVersion(cask.version)
                 let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
                 logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 results.append(ScanResult(appName: app.name,
@@ -545,7 +545,7 @@ struct Scanner {
 
             let fileName = app.url.deletingPathExtension().lastPathComponent
             if fileName != app.name, let cask = index.lookup(appName: fileName) {
-                let remoteVersion = cask.version
+                let remoteVersion = sanitizeCaskVersion(cask.version)
                 let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
                 logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
                 results.append(ScanResult(appName: app.name,
@@ -760,6 +760,13 @@ func normalizeAppName(_ name: String) -> String {
         value = String(value.dropLast(4))
     }
     return value.lowercased()
+}
+
+func sanitizeCaskVersion(_ version: String) -> String {
+    if let comma = version.firstIndex(of: ",") {
+        return String(version[..<comma])
+    }
+    return version
 }
 
 enum JSONValue: Decodable {

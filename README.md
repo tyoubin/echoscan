@@ -11,6 +11,7 @@ EchoScan is a lightweight, read-only macOS CLI that detects software updates by 
 - Falls back to Sparkle feeds (`SUFeedURL`) when no cask match exists.
 - Color-coded table output and a compact summary.
 - Detailed progress logs to stderr by default.
+- Results ordered by status, then by app modification date (newest first).
 
 ## Install / Build
 
@@ -41,7 +42,7 @@ Options (accepted for future compatibility):
 
 ## Output
 
-EchoScan shows only apps that are not up-to-date. Results are ordered by status:
+EchoScan shows only apps that are not up-to-date. Results are ordered by status and then by modification date (newest first):
 
 1. `Update` — exact cask bundle-id match shows a newer version.
 2. `Possible` — name-based match (non-verbatim) shows a newer version.
@@ -77,6 +78,7 @@ The Homebrew cask JSON and metadata are cached at:
 ~/.echoscan/
   cask.json
   cask.meta.json
+  sparkle/
 ```
 
 ## Notes

@@ -111,4 +111,20 @@ final class echoscanTests: XCTestCase {
         let version = parser.parse(data: Data(xml.utf8))
         XCTAssertEqual(version, "2.0.1")
     }
+
+    func testSortedResultsByStatusThenModDate() {
+        let now = Date()
+        let older = now.addingTimeInterval(-3600)
+        let newest = now.addingTimeInterval(3600)
+
+        let results = [
+            ScanResult(appName: "B", localVersion: "1", remoteVersion: "2", source: "Homebrew", status: .unknown, modDate: now),
+            ScanResult(appName: "A", localVersion: "1", remoteVersion: "2", source: "Homebrew", status: .update, modDate: older),
+            ScanResult(appName: "C", localVersion: "1", remoteVersion: "2", source: "Homebrew", status: .update, modDate: newest),
+            ScanResult(appName: "D", localVersion: "1", remoteVersion: "2", source: "Homebrew", status: .current, modDate: newest)
+        ]
+
+        let sorted = OutputRenderer.sortedResults(results)
+        XCTAssertEqual(sorted.map { $0.appName }, ["C", "A", "B"])
+    }
 }

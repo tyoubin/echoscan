@@ -407,6 +407,7 @@ struct LocalApp {
     let bundleID: String?
     let version: String?
     let sparkleFeed: URL?
+    let modDate: Date?
 }
 
 // MARK: - Local Discovery
@@ -484,11 +485,12 @@ enum LocalAppFinder {
             ?? (info["CFBundleVersion"] as? String)
 
         let sparkleFeed = (info["SUFeedURL"] as? String).flatMap { URL(string: $0) }
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
         if bundleID == nil {
             logger.info("Missing bundle ID for \(name)")
         }
 
-        return LocalApp(url: url, name: name, bundleID: bundleID, version: version, sparkleFeed: sparkleFeed)
+        return LocalApp(url: url, name: name, bundleID: bundleID, version: version, sparkleFeed: sparkleFeed, modDate: modDate)
     }
 }
 
@@ -643,6 +645,7 @@ struct ScanResult {
     let remoteVersion: String
     let source: String
     let status: Status
+    let modDate: Date?
 }
 
 enum Status: String {
@@ -677,7 +680,8 @@ struct Scanner {
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
                                           source: "Homebrew",
-                                          status: status))
+                                          status: status,
+                                          modDate: app.modDate))
                 continue
             }
 
@@ -689,7 +693,8 @@ struct Scanner {
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
                                           source: "Homebrew",
-                                          status: status))
+                                          status: status,
+                                          modDate: app.modDate))
                 continue
             }
 
@@ -702,7 +707,8 @@ struct Scanner {
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
                                           source: "Homebrew",
-                                          status: status))
+                                          status: status,
+                                          modDate: app.modDate))
                 continue
             }
 
@@ -713,7 +719,8 @@ struct Scanner {
                                           localVersion: localVersion,
                                           remoteVersion: remote,
                                           source: "Sparkle",
-                                          status: status))
+                                          status: status,
+                                          modDate: app.modDate))
                 continue
             }
 
@@ -721,7 +728,8 @@ struct Scanner {
                                       localVersion: localVersion,
                                       remoteVersion: "N/A",
                                       source: "Manual",
-                                      status: .unknown))
+                                      status: .unknown,
+                                      modDate: app.modDate))
         }
 
         return results
@@ -746,13 +754,7 @@ struct Scanner {
 
 enum OutputRenderer {
     static func render(results: [ScanResult], useColor: Bool) {
-        let filtered = results.filter { $0.status != .current }
-        let sorted = filtered.sorted {
-            let lhsRank = statusRank($0.status)
-            let rhsRank = statusRank($1.status)
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            return $0.appName.lowercased() < $1.appName.lowercased()
-        }
+        let sorted = sortedResults(results)
 
         let rows = sorted.map { result -> [String] in
             let statusText = colorize(result.status.rawValue, status: result.status, useColor: useColor)
@@ -793,6 +795,19 @@ enum OutputRenderer {
             return 2
         case .current:
             return 3
+        }
+    }
+
+    static func sortedResults(_ results: [ScanResult]) -> [ScanResult] {
+        let filtered = results.filter { $0.status != .current }
+        return filtered.sorted {
+            let lhsRank = statusRank($0.status)
+            let rhsRank = statusRank($1.status)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            let lhsDate = $0.modDate ?? Date.distantPast
+            let rhsDate = $1.modDate ?? Date.distantPast
+            if lhsDate != rhsDate { return lhsDate > rhsDate }
+            return $0.appName.lowercased() < $1.appName.lowercased()
         }
     }
 }

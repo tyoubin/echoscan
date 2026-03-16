@@ -371,8 +371,27 @@ enum LocalAppFinder {
     }
 
     private static func isAppStoreApp(url: URL) -> Bool {
-        let receipt = url.appendingPathComponent("Contents/_MASReceipt/receipt")
-        return FileManager.default.fileExists(atPath: receipt.path)
+        let fm = FileManager.default
+        if let bundle = Bundle(url: url),
+           let receiptURL = bundle.appStoreReceiptURL,
+           fm.fileExists(atPath: receiptURL.path) {
+            return true
+        }
+
+        let candidates = [
+            url.appendingPathComponent("Contents/_MASReceipt/receipt"),
+            url.appendingPathComponent("_MASReceipt/receipt"),
+            url.appendingPathComponent("Contents/_MASReceipt"),
+            url.appendingPathComponent("_MASReceipt"),
+            url.appendingPathComponent("iTunesMetadata.plist"),
+            url.appendingPathComponent("Contents/iTunesMetadata.plist"),
+            url.appendingPathComponent("Wrapper/iTunesMetadata.plist")
+        ]
+
+        for candidate in candidates where fm.fileExists(atPath: candidate.path) {
+            return true
+        }
+        return false
     }
 
     private static func readBundle(at url: URL, logger: Logger) -> LocalApp? {

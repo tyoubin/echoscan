@@ -1,0 +1,24 @@
+{
+	"configurations": [
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:echoscan}",
+			"name": "Debug echoscan",
+			"target": "echoscan",
+			"configuration": "debug",
+			"preLaunchTask": "swift: Build Debug echoscan"
+		},
+		{
+			"type": "swift",
+			"request": "launch",
+			"args": [],
+			"cwd": "${workspaceFolder:echoscan}",
+			"name": "Release echoscan",
+			"target": "echoscan",
+			"configuration": "release",
+			"preLaunchTask": "swift: Build Release echoscan"
+		}
+	]
+}

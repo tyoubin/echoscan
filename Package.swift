@@ -11,5 +11,9 @@ let package = Package(
         .executableTarget(
             name: "echoscan"
         ),
+        .testTarget(
+            name: "echoscanTests",
+            dependencies: ["echoscan"]
+        ),
     ]
 )

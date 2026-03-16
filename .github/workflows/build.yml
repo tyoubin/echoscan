@@ -29,6 +29,17 @@ jobs:
             -output .build/universal/echoscan
           chmod +x .build/universal/echoscan
 
+      - name: Run tests
+        run: swift test
+
+      - name: Ensure no cache outside ~/.echoscan
+        run: |
+          if [ -d "$HOME/Library/Caches/echoscan" ]; then
+            echo "Unexpected cache directory at $HOME/Library/Caches/echoscan"
+            ls -la "$HOME/Library/Caches/echoscan"
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

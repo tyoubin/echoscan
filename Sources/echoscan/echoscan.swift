@@ -16,6 +16,7 @@ struct EchoScan {
             logger.event("EchoScan starting")
             let cache = try CacheStore.makeDefault()
             logger.event("Cache directory: \(cache.directory.path)")
+            try URLCacheConfigurator.configure(baseDirectory: cache.directory, logger: logger)
             let sparkleCache = try SparkleCacheStore.makeDefault(baseDirectory: cache.directory)
             let client = CaskAPIClient(cache: cache, logger: logger)
             let casks = try client.fetchCasks()
@@ -169,6 +170,24 @@ struct CacheMetadata: Codable {
     let etag: String?
     let lastModified: String?
     let savedAt: Date
+}
+
+struct URLCacheConfigurator {
+    static func configure(baseDirectory: URL, logger: Logger) throws {
+        let fm = FileManager.default
+        let urlCacheDir = baseDirectory.appendingPathComponent("urlcache", isDirectory: true)
+        if !fm.fileExists(atPath: urlCacheDir.path) {
+            try fm.createDirectory(at: urlCacheDir, withIntermediateDirectories: true)
+        }
+        URLCache.shared = URLCache(memoryCapacity: 20 * 1024 * 1024,
+                                   diskCapacity: 200 * 1024 * 1024,
+                                   diskPath: urlCacheDir.path)
+        logger.event("URL cache directory: \(urlCacheDir.path)")
+    }
+
+    static func diskPath(baseDirectory: URL) -> String {
+        return baseDirectory.appendingPathComponent("urlcache", isDirectory: true).path
+    }
 }
 
 struct SparkleCacheStore {

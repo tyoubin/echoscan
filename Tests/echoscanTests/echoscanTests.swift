@@ -127,4 +127,21 @@ final class echoscanTests: XCTestCase {
         let sorted = OutputRenderer.sortedResults(results)
         XCTAssertEqual(sorted.map { $0.appName }, ["C", "A", "B"])
     }
+
+    func testCacheDirectoriesStayInHomeDotDir() throws {
+        let cache = try CacheStore.makeDefault()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        XCTAssertTrue(cache.directory.path.hasPrefix(home))
+        XCTAssertTrue(cache.directory.path.hasSuffix("/.echoscan"))
+        XCTAssertFalse(cache.directory.path.contains("/Library/Caches/"))
+    }
+
+    func testDerivedCachePaths() throws {
+        let base = URL(fileURLWithPath: "/tmp/echoscan-test-\(UUID().uuidString)", isDirectory: true)
+        let sparkle = try SparkleCacheStore.makeDefault(baseDirectory: base)
+        XCTAssertEqual(sparkle.directory.path, base.appendingPathComponent("sparkle", isDirectory: true).path)
+        let urlCachePath = URLCacheConfigurator.diskPath(baseDirectory: base)
+        XCTAssertEqual(urlCachePath, base.appendingPathComponent("urlcache", isDirectory: true).path)
+        XCTAssertFalse(urlCachePath.contains("/Library/Caches/"))
+    }
 }

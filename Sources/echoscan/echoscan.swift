@@ -524,8 +524,10 @@ struct Version: Comparable {
             return nil
         }
         if value.lowercased() == "latest" { return nil }
-        if let comma = value.firstIndex(of: ",") {
-            value = String(value[..<comma])
+        for separator in [",", "-", "+"] {
+            if let idx = value.firstIndex(of: separator.first!) {
+                value = String(value[..<idx])
+            }
         }
         let numbers = value.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
         if numbers.isEmpty { return nil }
@@ -947,10 +949,17 @@ func normalizeAppName(_ name: String) -> String {
 }
 
 func sanitizeCaskVersion(_ version: String) -> String {
-    if let comma = version.firstIndex(of: ",") {
-        return String(version[..<comma])
+    var value = version
+    if let comma = value.firstIndex(of: ",") {
+        value = String(value[..<comma])
     }
-    return version
+    if let dash = value.firstIndex(of: "-") {
+        value = String(value[..<dash])
+    }
+    if let plus = value.firstIndex(of: "+") {
+        value = String(value[..<plus])
+    }
+    return value
 }
 
 func fnv1a64Hex(_ value: String) -> String {

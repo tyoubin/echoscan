@@ -24,6 +24,13 @@ final class echoscanTests: XCTestCase {
     func testSanitizeCaskVersion() {
         XCTAssertEqual(sanitizeCaskVersion("4.1.20,778"), "4.1.20")
         XCTAssertEqual(sanitizeCaskVersion("2.0.1"), "2.0.1")
+        XCTAssertEqual(sanitizeCaskVersion("3.6.2-57f0b637"), "3.6.2")
+        XCTAssertEqual(sanitizeCaskVersion("1.5.0+20220101"), "1.5.0")
+    }
+
+    func testVersionParseStripsBuildMetadata() {
+        XCTAssertEqual(Version.parse("3.6.2-57f0b637")?.segments, [3, 6, 2])
+        XCTAssertEqual(Version.parse("1.5.0+20220101")?.segments, [1, 5, 0])
     }
 
     func testNormalizeAppName() {

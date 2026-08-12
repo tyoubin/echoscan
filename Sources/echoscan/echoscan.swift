@@ -262,8 +262,8 @@ struct CaskAPIClient {
 
         switch http.statusCode {
         case 200:
-            let etag = headerValue(from: http, name: "ETag")
-            let lastModified = headerValue(from: http, name: "Last-Modified")
+            let etag = httpHeaderValue(from: http, name: "ETag")
+            let lastModified = httpHeaderValue(from: http, name: "Last-Modified")
             try cache.saveData(data)
             try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()))
             logger.event("Cask index updated (HTTP 200)")
@@ -299,8 +299,8 @@ struct CaskAPIClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw ScanError.network("Failed to refresh")
         }
-        let etag = headerValue(from: http, name: "ETag")
-        let lastModified = headerValue(from: http, name: "Last-Modified")
+        let etag = httpHeaderValue(from: http, name: "ETag")
+        let lastModified = httpHeaderValue(from: http, name: "Last-Modified")
         try cache.saveData(data)
         try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()))
         logger.event("Cask index refreshed")
@@ -309,15 +309,7 @@ struct CaskAPIClient {
         return casks
     }
 
-    private func headerValue(from response: HTTPURLResponse, name: String) -> String? {
-        for (key, value) in response.allHeaderFields {
-            guard let key = key as? String else { continue }
-            if key.caseInsensitiveCompare(name) == .orderedSame {
-                return value as? String
-            }
-        }
-        return nil
-    }
+    
 
     private func decodeCasks(from data: Data) throws -> [CaskEntry] {
         let decoder = JSONDecoder()
@@ -584,8 +576,8 @@ struct SparkleClient {
             if let http = response as? HTTPURLResponse {
                 switch http.statusCode {
                 case 200:
-                    let etag = headerValue(from: http, name: "ETag")
-                    let lastModified = headerValue(from: http, name: "Last-Modified")
+                    let etag = httpHeaderValue(from: http, name: "ETag")
+                    let lastModified = httpHeaderValue(from: http, name: "Last-Modified")
                     try cache.saveData(data, for: feedURL)
                     try cache.saveMetadata(CacheMetadata(etag: etag, lastModified: lastModified, savedAt: Date()), for: feedURL)
                     let parser = SparkleFeedParser(logger: logger)
@@ -617,15 +609,7 @@ struct SparkleClient {
         return nil
     }
 
-    private func headerValue(from response: HTTPURLResponse, name: String) -> String? {
-        for (key, value) in response.allHeaderFields {
-            guard let key = key as? String else { continue }
-            if key.caseInsensitiveCompare(name) == .orderedSame {
-                return value as? String
-            }
-        }
-        return nil
-    }
+    
 }
 
 final class SparkleFeedParser: NSObject, XMLParserDelegate {
@@ -968,6 +952,16 @@ func normalizeAppName(_ name: String) -> String {
         value = String(value.dropLast(4))
     }
     return value.lowercased()
+}
+
+func httpHeaderValue(from response: HTTPURLResponse, name: String) -> String? {
+    for (key, value) in response.allHeaderFields {
+        guard let key = key as? String else { continue }
+        if key.caseInsensitiveCompare(name) == .orderedSame {
+            return value as? String
+        }
+    }
+    return nil
 }
 
 func sanitizeCaskVersion(_ version: String) -> String {

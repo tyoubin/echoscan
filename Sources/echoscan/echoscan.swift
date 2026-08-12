@@ -16,7 +16,6 @@ struct EchoScan {
             logger.event("EchoScan starting")
             let cache = try CacheStore.makeDefault()
             logger.event("Cache directory: \(cache.directory.path)")
-            try URLCacheConfigurator.configure(baseDirectory: cache.directory, logger: logger)
             let sparkleCache = try SparkleCacheStore.makeDefault(baseDirectory: cache.directory)
             let client = CaskAPIClient(cache: cache, logger: logger)
 
@@ -178,24 +177,6 @@ struct CacheMetadata: Codable {
     let savedAt: Date
 }
 
-struct URLCacheConfigurator {
-    static func configure(baseDirectory: URL, logger: Logger) throws {
-        let fm = FileManager.default
-        let urlCacheDir = baseDirectory.appendingPathComponent("urlcache", isDirectory: true)
-        if !fm.fileExists(atPath: urlCacheDir.path) {
-            try fm.createDirectory(at: urlCacheDir, withIntermediateDirectories: true)
-        }
-        URLCache.shared = URLCache(memoryCapacity: 20 * 1024 * 1024,
-                                   diskCapacity: 200 * 1024 * 1024,
-                                   diskPath: urlCacheDir.path)
-        logger.event("URL cache directory: \(urlCacheDir.path)")
-    }
-
-    static func diskPath(baseDirectory: URL) -> String {
-        return baseDirectory.appendingPathComponent("urlcache", isDirectory: true).path
-    }
-}
-
 struct SparkleCacheStore {
     let directory: URL
 
@@ -261,6 +242,7 @@ struct CaskAPIClient {
         logger.event("Fetching Homebrew cask index")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("echoscan", forHTTPHeaderField: "User-Agent")
 
         let cachedMeta = cache.loadMetadata()
@@ -309,6 +291,7 @@ struct CaskAPIClient {
     private func fetchWithoutCache() throws -> [CaskEntry] {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("echoscan", forHTTPHeaderField: "User-Agent")
         let (data, response) = try URLSession.shared.syncData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -582,6 +565,7 @@ struct SparkleClient {
     func fetchLatestVersion(feedURL: URL) -> String? {
         var request = URLRequest(url: feedURL)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("echoscan", forHTTPHeaderField: "User-Agent")
         logger.event("Fetching Sparkle feed: \(feedURL.absoluteString)")
 

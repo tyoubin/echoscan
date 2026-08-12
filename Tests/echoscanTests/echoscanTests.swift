@@ -147,8 +147,5 @@ final class echoscanTests: XCTestCase {
         let base = URL(fileURLWithPath: "/tmp/echoscan-test-\(UUID().uuidString)", isDirectory: true)
         let sparkle = try SparkleCacheStore.makeDefault(baseDirectory: base)
         XCTAssertEqual(sparkle.directory.path, base.appendingPathComponent("sparkle", isDirectory: true).path)
-        let urlCachePath = URLCacheConfigurator.diskPath(baseDirectory: base)
-        XCTAssertEqual(urlCachePath, base.appendingPathComponent("urlcache", isDirectory: true).path)
-        XCTAssertFalse(urlCachePath.contains("/Library/Caches/"))
     }
 }

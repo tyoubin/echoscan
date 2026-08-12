@@ -872,16 +872,17 @@ struct ProcessRunner {
 
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         try process.run()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         if process.terminationStatus != 0 {
             throw ScanError.network("Process failed: \(launchPath)")
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return "" }
         return output
     }

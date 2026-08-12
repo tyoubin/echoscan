@@ -108,10 +108,12 @@ struct Logger {
     }
 
     func event(_ message: String) {
+        guard verbose else { return }
         write("\(Logger.timestamp()) \(message)")
     }
 
     func scan(_ message: String) {
+        guard verbose else { return }
         write(message)
     }
 

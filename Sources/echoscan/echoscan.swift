@@ -441,8 +441,15 @@ enum LocalAppFinder {
     static func findApps(logger: Logger) throws -> [LocalApp] {
         let query = "kMDItemContentType == 'com.apple.application-bundle'"
         logger.event("Searching /Applications via mdfind")
-        let output = try ProcessRunner.run("/usr/bin/mdfind", ["-onlyin", "/Applications", query])
-        let paths = output.split(separator: "\n").map { String($0) }
+        var paths: [String] = []
+        if let output = try? ProcessRunner.run("/usr/bin/mdfind", ["-onlyin", "/Applications", query]) {
+            paths = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            paths.removeAll { $0.isEmpty }
+        }
+        if paths.isEmpty {
+            logger.event("No mdfind results; falling back to directory traversal")
+            paths = walkApplications()
+        }
         var apps: [LocalApp] = []
         var skippedNested = 0
         var skippedAppStore = 0
@@ -451,8 +458,8 @@ enum LocalAppFinder {
 
         for path in paths {
             guard path.hasSuffix(".app") else { continue }
+            guard path.hasPrefix("/Applications/") else { continue }
             let url = URL(fileURLWithPath: path)
-            guard url.path.hasPrefix("/Applications/") else { continue }
             guard !isNestedApp(url: url) else { skippedNested += 1; continue }
             guard !isAppStoreApp(url: url) else { skippedAppStore += 1; continue }
             guard let app = readBundle(at: url, logger: logger) else { skippedNoBundle += 1; continue }
@@ -462,6 +469,21 @@ enum LocalAppFinder {
 
         logger.event("Found \(apps.count) app(s) after filtering (\(paths.count) candidates, \(skippedNested) nested, \(skippedAppStore) App Store, \(skippedApple) Apple, \(skippedNoBundle) missing bundle)")
         return apps.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    private static func walkApplications() -> [String] {
+        let root = URL(fileURLWithPath: "/Applications")
+        let options: FileManager.DirectoryEnumerationOptions = [.skipsHiddenFiles]
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [], options: options) else {
+            return []
+        }
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            if url.pathExtension == "app" {
+                paths.append(url.path)
+            }
+        }
+        return paths
     }
 
     private static func isNestedApp(url: URL) -> Bool {

@@ -612,14 +612,13 @@ struct SparkleClient {
         }
         return nil
     }
-
-    
 }
 
 final class SparkleFeedParser: NSObject, XMLParserDelegate {
     private let logger: Logger
     private var latestVersion: String?
     private var insideItem = false
+    private var currentItemVersion: String?
 
     init(logger: Logger) {
         self.logger = logger
@@ -635,15 +634,16 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         if elementName.lowercased() == "item" {
             insideItem = true
+            currentItemVersion = nil
         }
 
         guard insideItem else { return }
         if elementName.lowercased() == "enclosure" {
-            if latestVersion == nil {
+            if currentItemVersion == nil {
                 if let version = attributeDict["sparkle:shortVersionString"] ?? attributeDict["shortVersionString"] {
-                    latestVersion = version
+                    currentItemVersion = version
                 } else if let version = attributeDict["sparkle:version"] ?? attributeDict["version"] {
-                    latestVersion = version
+                    currentItemVersion = version
                 }
             }
         }
@@ -651,7 +651,11 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         if elementName.lowercased() == "item" {
+            if latestVersion == nil, let version = currentItemVersion {
+                latestVersion = version
+            }
             insideItem = false
+            currentItemVersion = nil
         }
     }
 

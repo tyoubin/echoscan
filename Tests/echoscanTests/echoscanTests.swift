@@ -119,6 +119,24 @@ final class echoscanTests: XCTestCase {
         XCTAssertEqual(version, "2.0.1")
     }
 
+    func testSparkleFeedParserSkipsItemsWithoutVersion() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <title>No release notes feed entry</title>
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="3.1.0" sparkle:version="310" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "3.1.0")
+    }
+
     func testSortedResultsByStatusThenModDate() {
         let now = Date()
         let older = now.addingTimeInterval(-3600)

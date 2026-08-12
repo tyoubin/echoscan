@@ -64,7 +64,7 @@ struct CLIOptions {
             case "--quiet":
                 verbose = false
             default:
-                break
+                FileHandle.standardError.write(Data("warning: ignoring unknown option \(arg)\n".utf8))
             }
         }
 

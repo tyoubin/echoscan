@@ -123,10 +123,14 @@ struct Logger {
         }
     }
 
-    static func timestamp() -> String {
+    nonisolated(unsafe) private static let timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: Date())
+        return formatter
+    }()
+
+    static func timestamp() -> String {
+        return timestampFormatter.string(from: Date())
     }
 }
 

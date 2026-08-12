@@ -691,6 +691,8 @@ struct Scanner {
 
     func scan(apps: [LocalApp]) throws -> [ScanResult] {
         var results: [ScanResult] = []
+        let feeds = Array(Set(apps.compactMap { $0.sparkleFeed }))
+        let remoteVersions = prefetchSparkleVersions(feeds: feeds)
 
         for app in apps {
             let localVersion = app.version ?? "N/A"
@@ -735,7 +737,7 @@ struct Scanner {
                 continue
             }
 
-            if let feed = app.sparkleFeed, let remote = sparkle.fetchLatestVersion(feedURL: feed) {
+            if let feed = app.sparkleFeed, let remote = remoteVersions[feed] ?? nil {
                 let status = compare(local: app.version, remote: remote)
                 logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in sparkle")
                 results.append(ScanResult(appName: app.name,
@@ -755,6 +757,20 @@ struct Scanner {
                                       modDate: app.modDate))
         }
 
+        return results
+    }
+
+    private func prefetchSparkleVersions(feeds: [URL]) -> [URL: String?] {
+        guard !feeds.isEmpty else { return [:] }
+        let boxes: [URL: ResultBox<String?>] = Dictionary(uniqueKeysWithValues: feeds.map { ($0, ResultBox()) })
+        DispatchQueue.concurrentPerform(iterations: feeds.count) { index in
+            let feed = feeds[index]
+            boxes[feed]?.value = self.sparkle.fetchLatestVersion(feedURL: feed)
+        }
+        var results: [URL: String?] = [:]
+        for feed in feeds {
+            results[feed] = boxes[feed]?.value
+        }
         return results
     }
 

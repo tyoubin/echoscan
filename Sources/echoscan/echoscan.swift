@@ -19,7 +19,13 @@ struct EchoScan {
             try URLCacheConfigurator.configure(baseDirectory: cache.directory, logger: logger)
             let sparkleCache = try SparkleCacheStore.makeDefault(baseDirectory: cache.directory)
             let client = CaskAPIClient(cache: cache, logger: logger)
-            let casks = try client.fetchCasks()
+
+            var casks: [CaskEntry] = []
+            do {
+                casks = try client.fetchCasks()
+            } catch {
+                logger.event("Cask index unavailable (\(error)); continuing without Homebrew matches")
+            }
             let index = CaskIndex(casks: casks)
 
             let apps = try LocalAppFinder.findApps(logger: logger)

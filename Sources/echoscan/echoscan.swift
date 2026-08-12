@@ -901,6 +901,10 @@ enum ScanError: Error, CustomStringConvertible {
 
 extension URLSession {
     func syncData(for request: URLRequest) throws -> (Data, URLResponse) {
+        var request = request
+        if request.timeoutInterval <= 0 {
+            request.timeoutInterval = 60
+        }
         let semaphore = DispatchSemaphore(value: 0)
         let box = ResultBox<Result<(Data, URLResponse), Error>>()
 
@@ -915,7 +919,10 @@ extension URLSession {
             semaphore.signal()
         }
         task.resume()
-        semaphore.wait()
+        if semaphore.wait(timeout: .now() + request.timeoutInterval + 30) == .timedOut {
+            task.cancel()
+            throw ScanError.network("Request timed out")
+        }
 
         guard let result = box.value else {
             throw ScanError.network("No response")

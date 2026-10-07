@@ -137,6 +137,27 @@ final class echoscanTests: XCTestCase {
         XCTAssertEqual(version, "3.1.0")
     }
 
+    func testSparkleFeedParserSelectsHighestVersionRegardlessOfItemOrder() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.1" />
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.3" />
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.2" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "2.0.3")
+    }
+
     func testSortedResultsByStatusThenModDate() {
         let now = Date()
         let older = now.addingTimeInterval(-3600)

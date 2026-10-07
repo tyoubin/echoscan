@@ -651,8 +651,18 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         if elementName.lowercased() == "item" {
-            if latestVersion == nil, let version = currentItemVersion {
-                latestVersion = version
+            if let version = currentItemVersion {
+                if let candidate = Version.parse(version) {
+                    if let latestVersion, let current = Version.parse(latestVersion) {
+                        if candidate > current {
+                            self.latestVersion = version
+                        }
+                    } else {
+                        latestVersion = version
+                    }
+                } else if latestVersion == nil {
+                    latestVersion = version
+                }
             }
             insideItem = false
             currentItemVersion = nil

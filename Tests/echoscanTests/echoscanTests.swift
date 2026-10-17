@@ -63,7 +63,10 @@ final class echoscanTests: XCTestCase {
         XCTAssertFalse(collected.contains("gimp"))
     }
 
-    func testCaskEntryDecoding() throws {
+    func testCaskEntryDecodingWithLegacyTopLevelBundleID() throws {
+        // Some older API snapshot formats still carry a top-level
+        // bundle_id, but it is informational only and is no longer used for
+        // matching; the .app artifact file names are the identity anchor.
         let json = """
         {
           "token": "gimp",
@@ -78,12 +81,12 @@ final class echoscanTests: XCTestCase {
         let data = Data(json.utf8)
         let entry = try JSONDecoder().decode(CaskEntry.self, from: data)
         XCTAssertEqual(entry.token, "gimp")
-        XCTAssertEqual(entry.bundleIDs, ["org.gimp.gimp-2.10"])
-        XCTAssertTrue(entry.appNames.contains("GIMP.app"))
+        XCTAssertEqual(entry.appFileNames, ["GIMP.app"])
+        XCTAssertEqual(entry.displayName, "GIMP")
         XCTAssertEqual(entry.version, "4.1.20,778")
     }
 
-    func testCaskIndexLookupByAppName() throws {
+    func testCaskIndexLookupByAppFileName() throws {
         let json = """
         [
           {
@@ -99,9 +102,83 @@ final class echoscanTests: XCTestCase {
         let data = Data(json.utf8)
         let entries = try JSONDecoder().decode([CaskEntry].self, from: data)
         let index = CaskIndex(casks: entries)
-        let match = index.lookup(appName: "GIMP")
-        XCTAssertNotNil(match)
-        XCTAssertEqual(match?.token, "gimp")
+        XCTAssertNotNil(index.lookup(appFileName: "GIMP"))
+        XCTAssertNotNil(index.lookup(appFileName: "GIMP.app"))
+        XCTAssertNil(index.lookup(appFileName: "An App With No Cask"))
+    }
+
+    func testCaskIndexPrefersAppFileArtifactOverNestedTarget() throws {
+        // The artifacts entry writes "OpenCode.app" to /Applications, so both
+        // the plain file reference and the target path must yield the same
+        // "OpenCode.app" lookup key.
+        let json = """
+        [
+          {
+            "token": "opencode-desktop",
+            "name": ["OpenCode"],
+            "version": "2.0.32",
+            "artifacts": [
+              {"app": ["OpenCode.app"], "target": "/Applications/OpenCode.app"}
+            ]
+          }
+        ]
+        """
+        let entries = try JSONDecoder().decode([CaskEntry].self, from: Data(json.utf8))
+        let index = CaskIndex(casks: entries)
+        let match = index.lookup(appFileName: "OpenCode")
+        XCTAssertEqual(match?.token, "opencode-desktop")
+    }
+
+    func testCaskIndexRegistersAliases() throws {
+        // Homebrew renames casks and keeps the old token as an alias; a local
+        // app installed under the old token (e.g. "iina") must still resolve
+        // to the renamed cask entry.
+        let json = """
+        [
+          {
+            "token": "some-cask",
+            "name": ["Some Cask"],
+            "version": "1.0",
+            "aliases": ["old-token"],
+            "artifacts": [
+              ["app", ["Some Cask.app"]]
+            ]
+          },
+          {
+            "token": "renamed-cask",
+            "name": ["Renamed"],
+            "version": "2.0",
+            "aliases": ["iina"],
+            "artifacts": [
+              {"app": ["IINA.app"], "target": "/Applications/IINA.app"}
+            ]
+          }
+        ]
+        """
+        let entries = try JSONDecoder().decode([CaskEntry].self, from: Data(json.utf8))
+        let index = CaskIndex(casks: entries)
+        XCTAssertEqual(index.lookup(appFileName: "iina")?.token, "renamed-cask")
+        XCTAssertEqual(index.lookup(appFileName: "old-token")?.token, "some-cask")
+    }
+
+    func testCaskIndexKeepsLookupWithoutBundleID() throws {
+        // formulae.brew.sh API JSON no longer has a bundle_id field, so
+        // decoding must not fail without one.
+        let json = """
+        [
+          {
+            "token": "qbittorrent",
+            "name": ["qBittorrent"],
+            "version": "5.2.3",
+            "artifacts": [
+              {"app": ["qBittorrent.app"], "target": "/Applications/qBittorrent.app"}
+            ]
+          }
+        ]
+        """
+        let entries = try JSONDecoder().decode([CaskEntry].self, from: Data(json.utf8))
+        let index = CaskIndex(casks: entries)
+        XCTAssertEqual(index.lookup(appFileName: "qbittorrent")?.token, "qbittorrent")
     }
 
     func testSparkleFeedParser() {

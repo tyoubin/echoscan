@@ -44,8 +44,8 @@ Options (accepted for future compatibility):
 
 EchoScan shows only apps that are not up-to-date. Results are ordered by status and then by modification date (newest first):
 
-1. `Update` — exact cask bundle-id match shows a newer version.
-2. `Possible` — name-based match (non-verbatim) shows a newer version.
+1. `Update` — Homebrew installs the app bundle exactly under the app's Info.plist file name (e.g. `OpenCode.app` for `opencode-desktop`).
+2. `Possible` — the Info.plist display name happens to match a cask name, but Homebrew would install that cask into a different bundle file. Identity is unverified.
 3. `Check` — could not confidently compare (missing version or feed).
 
 A summary line is printed at the end:

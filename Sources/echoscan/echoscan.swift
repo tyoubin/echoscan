@@ -325,12 +325,20 @@ struct CaskAPIClient {
 
 struct CaskEntry: Decodable {
     let token: String
-    let name: [String]?
+    let name: String?
     let desc: String?
     let homepage: String?
     let version: String
-    let bundleIDs: [String]
-    let appNames: [String]
+    // Homebrew installs a cask by writing each artifact's app file (e.g.
+    // "OpenCode.app") into /Applications, so the .app file name is the closest
+    // thing to a stable identity we can map. Note that bundle_id is no longer
+    // present in formulae.brew.sh API JSON (it is null for every cask), so the
+    // old bundle-id index was dead code.
+    let appFileNames: [String]
+    // Token aliases point at renamed casks (e.g. "iina" → "iina-plus"); the
+    // alias names are registered so lookups keep matching the token that used
+    // to own the app file.
+    let aliases: [String]
 
     enum CodingKeys: String, CodingKey {
         case token
@@ -338,17 +346,19 @@ struct CaskEntry: Decodable {
         case desc
         case homepage
         case version
-        case bundleID = "bundle_id"
         case artifacts
+        case aliases
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         token = try container.decode(String.self, forKey: .token)
+        // "name" may be a string or an array depending on the cask; keep only
+        // the first value, both are unverified display names.
         if let one = try? container.decode(String.self, forKey: .name) {
-            name = [one]
+            name = one
         } else if let many = try? container.decode([String].self, forKey: .name) {
-            name = many
+            name = many.first
         } else {
             name = nil
         }
@@ -356,60 +366,62 @@ struct CaskEntry: Decodable {
         homepage = try container.decodeIfPresent(String.self, forKey: .homepage)
         version = (try? container.decode(String.self, forKey: .version)) ?? ""
 
-        if let one = try? container.decode(String.self, forKey: .bundleID) {
-            bundleIDs = [one]
-        } else if let many = try? container.decode([String].self, forKey: .bundleID) {
-            bundleIDs = many
-        } else {
-            bundleIDs = []
-        }
-
         let artifacts = (try? container.decode([JSONValue].self, forKey: .artifacts)) ?? []
         var collected: [String] = []
         for value in artifacts {
             value.collectAppNames(into: &collected)
         }
-        appNames = Array(Set(collected))
+        appFileNames = collected
+
+        if let aliases = try? container.decode([String].self, forKey: .aliases) {
+            self.aliases = aliases
+        } else if let one = try? container.decode(String.self, forKey: .aliases) {
+            self.aliases = [one]
+        } else {
+            self.aliases = []
+        }
     }
 
     var displayName: String {
-        if let name = name?.first, !name.isEmpty { return name }
+        if let name = name, !name.isEmpty { return name }
         return token
     }
 }
 
 struct CaskIndex {
-    private var bundleMap: [String: CaskEntry] = [:]
-    private var appNameMap: [String: CaskEntry] = [:]
+    private var appFileNameMap: [String: CaskEntry] = [:]
+
+    private static func register(_ cask: CaskEntry, fileName: String, into map: inout [String: CaskEntry]) {
+        let key = normalizeAppName(fileName)
+        if !key.isEmpty, map[key] == nil {
+            map[key] = cask
+        }
+    }
 
     init(casks: [CaskEntry]) {
         for cask in casks {
-            for id in cask.bundleIDs {
-                if bundleMap[id] == nil {
-                    bundleMap[id] = cask
-                }
+            for filename in cask.appFileNames {
+                CaskIndex.register(cask, fileName: filename, into: &appFileNameMap)
             }
-            for appName in cask.appNames {
-                let key = normalizeAppName(appName)
-                if !key.isEmpty, appNameMap[key] == nil {
-                    appNameMap[key] = cask
-                }
+            for alias in cask.aliases {
+                CaskIndex.register(cask, fileName: alias, into: &appFileNameMap)
             }
         }
     }
 
-    func lookup(bundleID: String) -> CaskEntry? {
-        return bundleMap[bundleID]
-    }
-
-    func lookup(appName: String) -> CaskEntry? {
-        return appNameMap[normalizeAppName(appName)]
+    func lookup(appFileName: String) -> CaskEntry? {
+        return appFileNameMap[normalizeAppName(appFileName)]
     }
 }
 
 struct LocalApp {
     let url: URL
     let name: String
+    // The app's file name without the ".app" extension (e.g. "OpenCode" for
+    // "/Applications/OpenCode.app"). Homebrew artifacts install exactly this
+    // file, so the bundle file name — not the Info.plist display name — is the
+    // right key for cask lookups.
+    let fileName: String
     let bundleID: String?
     let version: String?
     let sparkleFeed: URL?
@@ -518,7 +530,12 @@ enum LocalAppFinder {
             logger.info("Missing bundle ID for \(name)")
         }
 
-        return LocalApp(url: url, name: name, bundleID: bundleID, version: version, sparkleFeed: sparkleFeed, modDate: modDate)
+        let fileName = url.deletingPathExtension().lastPathComponent
+        if normalizeAppName(fileName) != normalizeAppName(name) {
+            logger.info("App display name \"\(name)\" differs from file name \(fileName); matching by file name")
+        }
+
+        return LocalApp(url: url, name: name, fileName: fileName, bundleID: bundleID, version: version, sparkleFeed: sparkleFeed, modDate: modDate)
     }
 }
 
@@ -533,6 +550,7 @@ struct Version: Comparable {
             return nil
         }
         if value.lowercased() == "latest" { return nil }
+        if value.lowercased() == "beta" { return nil }
         for separator in [",", "-", "+"] {
             if let idx = value.firstIndex(of: separator.first!) {
                 value = String(value[..<idx])
@@ -674,7 +692,7 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         if let short = currentItemShortVersion {
             noteShortVersion(short)
         } else if let build = currentItemBuildVersion {
-            noteBuildVersion(build)
+            parseBuildItem(build)
         }
     }
 
@@ -694,18 +712,28 @@ final class SparkleFeedParser: NSObject, XMLParserDelegate {
         }
     }
 
-    private func noteBuildVersion(_ build: String) {
-        guard let candidate = Int(build.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            logger.info("Ignoring non-numeric Sparkle build version: \(build)")
-            return
-        }
-        if let best = bestBuildVersion {
-            if candidate > best.build {
+    private func parseBuildItem(_ build: String) {
+        let trimmed = build.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A purely numeric sparkle:version is a build number (e.g. "1201");
+        // compare those against other build numbers only, so they can never
+        // beat a semantic version like "12.0".
+        if let candidate = Int(trimmed) {
+            if let best = bestBuildVersion {
+                if candidate > best.build {
+                    bestBuildVersion = (build, candidate)
+                }
+            } else {
                 bestBuildVersion = (build, candidate)
             }
-        } else {
-            bestBuildVersion = (build, candidate)
+            return
         }
+        // OpenEmu-style feeds put semantic versions in sparkle:version
+        // (e.g. "2.4.1"); those compare against semantic versions.
+        if let candidate = Version.parse(trimmed) {
+            noteShortVersion(candidate.raw)
+            return
+        }
+        logger.info("Ignoring non-numeric Sparkle build version: \(build)")
     }
 
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
@@ -750,10 +778,14 @@ struct Scanner {
         for app in apps {
             let localVersion = app.version ?? "N/A"
 
-            if let bundleID = app.bundleID, let cask = index.lookup(bundleID: bundleID) {
+            // Homebrew artifacts install the app bundle as fileName into
+            // /Applications, so matching the cask's app file name against the
+            // local .app file name is the most precise identification this
+            // tool can make. That is treated as a strong (exact) match.
+            if let cask = index.lookup(appFileName: app.fileName) {
                 let remoteVersion = sanitizeCaskVersion(cask.version)
                 let status = compare(local: app.version, remote: remoteVersion)
-                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name) [\(app.fileName)], current version \(localVersion), exact cask file match \(cask.token)")
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
@@ -763,24 +795,14 @@ struct Scanner {
                 continue
             }
 
-            if let cask = index.lookup(appName: app.name) {
+            // Weaker signal: the Info.plist display name happens to match a
+            // cask's display name, but Homebrew installs that cask's app
+            // bundle under a different file name (or not at all). The
+            // identity is unverified, so a newer remote is only "possible".
+            if let cask = index.lookup(appFileName: app.name), normalizeAppName(app.name) != normalizeAppName(app.fileName) {
                 let remoteVersion = sanitizeCaskVersion(cask.version)
                 let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
-                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
-                results.append(ScanResult(appName: app.name,
-                                          localVersion: localVersion,
-                                          remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,
-                                          source: "Homebrew",
-                                          status: status,
-                                          modDate: app.modDate))
-                continue
-            }
-
-            let fileName = app.url.deletingPathExtension().lastPathComponent
-            if fileName != app.name, let cask = index.lookup(appName: fileName) {
-                let remoteVersion = sanitizeCaskVersion(cask.version)
-                let status = compare(local: app.version, remote: remoteVersion, weakMatch: true)
-                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), remote found in cask")
+                logger.scan("\(Logger.timestamp()) Scanning \(app.name), current version \(localVersion), weak name match \(cask.token)")
                 results.append(ScanResult(appName: app.name,
                                           localVersion: localVersion,
                                           remoteVersion: remoteVersion.isEmpty ? "N/A" : remoteVersion,

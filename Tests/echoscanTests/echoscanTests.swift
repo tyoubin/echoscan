@@ -203,6 +203,78 @@ final class echoscanTests: XCTestCase {
         XCTAssertEqual(version, "201")
     }
 
+    func testSparkleFeedParserOverwritesFallbackWithParsableVersion() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:shortVersionString="beta" />
+            </item>
+            <item>
+              <title>Placeholder item</title>
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.3" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "2.0.3")
+    }
+
+    func testSparkleFeedParserReturnsUnparsableVersionAsFallback() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:shortVersionString="latest" />
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="beta" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "latest")
+    }
+
+    func testSparkleFeedParserKeepsFirstWhenVersionsAreEqual() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.3" />
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="2.0.3" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "2.0.3")
+    }
+
+    func testSparkleFeedParserIgnoresFeedWithoutEnclosures() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <title>No release notes feed entry</title>
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertNil(version)
+    }
+
     func testSortedResultsByStatusThenModDate() {
         let now = Date()
         let older = now.addingTimeInterval(-3600)

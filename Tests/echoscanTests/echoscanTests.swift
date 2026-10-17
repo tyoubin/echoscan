@@ -158,6 +158,51 @@ final class echoscanTests: XCTestCase {
         XCTAssertEqual(version, "2.0.3")
     }
 
+    func testSparkleFeedParserDoesNotCompareBuildNumberAgainstSemVer() {
+        // Older items often only carry sparkle:version (a build number). Build
+        // numbers must never be compared against semantic versions, otherwise
+        // "1200" would beat "12.0".
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:version="1200" />
+            </item>
+            <item>
+              <enclosure sparkle:shortVersionString="12.0" />
+            </item>
+            <item>
+              <enclosure sparkle:version="1201" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "12.0")
+    }
+
+    func testSparkleFeedParserFallsBackToHighestBuildNumber() {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <enclosure sparkle:version="107" />
+            </item>
+            <item>
+              <enclosure sparkle:version="201" />
+            </item>
+            <item>
+              <enclosure sparkle:version="110" />
+            </item>
+          </channel>
+        </rss>
+        """
+        let parser = SparkleFeedParser(logger: Logger(verbose: false))
+        let version = parser.parse(data: Data(xml.utf8))
+        XCTAssertEqual(version, "201")
+    }
+
     func testSortedResultsByStatusThenModDate() {
         let now = Date()
         let older = now.addingTimeInterval(-3600)

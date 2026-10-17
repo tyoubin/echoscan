@@ -616,56 +616,95 @@ struct SparkleClient {
 
 final class SparkleFeedParser: NSObject, XMLParserDelegate {
     private let logger: Logger
-    private var latestVersion: String?
     private var insideItem = false
-    private var currentItemVersion: String?
+    private var currentItemShortVersion: String?
+    private var currentItemBuildVersion: String?
+    // Human-readable semantic versions from sparkle:shortVersionString.
+    private var bestShortVersion: (raw: String, parsed: Version)?
+    // Sparkle build numbers from sparkle:version. Tracked separately so build
+    // numbers are never compared against semantic versions; a feed that mixes
+    // both attribute styles prefers shortVersionString.
+    private var bestBuildVersion: (raw: String, build: Int)?
+    // First item version that cannot be parsed at all; only used when the feed
+    // contains no parsable version.
+    private var fallbackVersion: String?
 
     init(logger: Logger) {
         self.logger = logger
     }
 
     func parse(data: Data) -> String? {
+        insideItem = false
+        currentItemShortVersion = nil
+        currentItemBuildVersion = nil
+        bestShortVersion = nil
+        bestBuildVersion = nil
+        fallbackVersion = nil
+
         let parser = XMLParser(data: data)
         parser.delegate = self
         parser.parse()
-        return latestVersion
+        return bestShortVersion?.raw ?? bestBuildVersion?.raw ?? fallbackVersion
     }
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         if elementName.lowercased() == "item" {
             insideItem = true
-            currentItemVersion = nil
+            currentItemShortVersion = nil
+            currentItemBuildVersion = nil
         }
 
         guard insideItem else { return }
-        if elementName.lowercased() == "enclosure" {
-            if currentItemVersion == nil {
-                if let version = attributeDict["sparkle:shortVersionString"] ?? attributeDict["shortVersionString"] {
-                    currentItemVersion = version
-                } else if let version = attributeDict["sparkle:version"] ?? attributeDict["version"] {
-                    currentItemVersion = version
-                }
+        if elementName.lowercased() == "enclosure", currentItemShortVersion == nil {
+            if let version = attributeDict["sparkle:shortVersionString"] ?? attributeDict["shortVersionString"] {
+                currentItemShortVersion = version
+            } else if let version = attributeDict["sparkle:version"] ?? attributeDict["version"] {
+                currentItemBuildVersion = version
             }
         }
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName.lowercased() == "item" {
-            if let version = currentItemVersion {
-                if let candidate = Version.parse(version) {
-                    if let latestVersion, let current = Version.parse(latestVersion) {
-                        if candidate > current {
-                            self.latestVersion = version
-                        }
-                    } else {
-                        latestVersion = version
-                    }
-                } else if latestVersion == nil {
-                    latestVersion = version
-                }
-            }
+        guard elementName.lowercased() == "item" else { return }
+        defer {
             insideItem = false
-            currentItemVersion = nil
+            currentItemShortVersion = nil
+            currentItemBuildVersion = nil
+        }
+        if let short = currentItemShortVersion {
+            noteShortVersion(short)
+        } else if let build = currentItemBuildVersion {
+            noteBuildVersion(build)
+        }
+    }
+
+    private func noteShortVersion(_ short: String) {
+        guard let candidate = Version.parse(short) else {
+            if bestShortVersion == nil, bestBuildVersion == nil, fallbackVersion == nil {
+                fallbackVersion = short
+            }
+            return
+        }
+        if let best = bestShortVersion {
+            if candidate > best.parsed {
+                bestShortVersion = (short, candidate)
+            }
+        } else {
+            bestShortVersion = (short, candidate)
+        }
+    }
+
+    private func noteBuildVersion(_ build: String) {
+        guard let candidate = Int(build.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            logger.info("Ignoring non-numeric Sparkle build version: \(build)")
+            return
+        }
+        if let best = bestBuildVersion {
+            if candidate > best.build {
+                bestBuildVersion = (build, candidate)
+            }
+        } else {
+            bestBuildVersion = (build, candidate)
         }
     }
 
